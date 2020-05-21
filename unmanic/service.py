@@ -36,7 +36,10 @@ import json
 import time
 import threading
 import queue
-import pyinotify
+#import pyinotify
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
 import schedule
 import signal
 
@@ -191,7 +194,7 @@ class LibraryScanner(threading.Thread):
                     self._log("Ignoring file due to incorrect suffix - '{}'".format(file_path))
 
 
-class EventProcessor(pyinotify.ProcessEvent):
+class EventProcessor(FileSystemEventHandler):
     def __init__(self, data_queues, settings):
         self.name = "EventProcessor"
         self.settings = settings
@@ -308,18 +311,15 @@ class Service:
 
     def start_inotify_watch_manager(self, data_queues, settings):
         main_logger.info("Starting EventProcessor")
-        wm = pyinotify.WatchManager()
-        wm.add_watch(settings.LIBRARY_PATH, pyinotify.ALL_EVENTS, rec=True)
-        # event processor
-        ep = EventProcessor(data_queues, settings)
-        # notifier
-        notifier = pyinotify.ThreadedNotifier(wm, ep)
-        notifier.start()
+        monitor = Observer()
+
+        monitor.schedule(None, settings.LIBRARY_PATH, recursive=True)
+
         self.threads.append({
             'name':   'EventProcessor',
-            'thread': notifier
+            'thread': monitor
         })
-        return notifier
+        return True
 
     def start_ui_server(self, data_queues, settings, worker_handle):
         main_logger.info("Starting UIServer")
@@ -376,7 +376,10 @@ class Service:
         signal.signal(signal.SIGINT, self.sig_handle)
         signal.signal(signal.SIGTERM, self.sig_handle)
         while self.run_threads:
-            signal.pause()
+            try:
+                signal.pause()
+            except AttributeError:
+                time.sleep(1)
 
         # Received term signal. Stop everything
         main_logger.info("Stopping all threads")
